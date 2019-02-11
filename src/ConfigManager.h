@@ -129,6 +129,8 @@ public:
     void setWifiConnectInterval(const int interval);
     void setAPCallback(std::function<void(WebServer*)> callback);
     void setAPICallback(std::function<void(WebServer*)> callback);
+    void setAuth(const char *username, const char *password);
+    void sendCORS();
     void loop();
 
     template<typename T>
@@ -165,6 +167,8 @@ private:
     char *apName = (char *)"Thing";
     char *apPassword = NULL;
     char *apFilename = (char *)"/index.html";
+    char* authUserName = NULL;
+    char* authPassword = NULL;
     int apTimeout = 0;
     unsigned long apStart = 0;
 
@@ -182,9 +186,11 @@ private:
 
     void handleAPGet();
     void handleAPPost();
+    void handleOptions();
     void handleRESTGet();
     void handleRESTPut();
     void handleNotFound();
+    bool handleAuth();
 
     bool wifiConnected();
     void setup();

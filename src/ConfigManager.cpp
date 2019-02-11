@@ -43,10 +43,26 @@ void ConfigManager::setAPICallback(std::function<void(WebServer*)> callback) {
     this->apiCallback = callback;
 }
 
+void ConfigManager::setAuth(const char *username, const char *password) {
+    this->authUserName = (char *)username;
+    this->authPassword = (char *)password;
+}
+
+void ConfigManager::sendCORS() {
+    // Create CORS
+    server->sendHeader("Access-Control-Request-Method", "GET, POST, PUT, OPTIONS, DELETE");
+    server->sendHeader("Access-Control-Request-Headers", "authorization, X-PINGOTHER, Content-Type");
+    server->sendHeader("Access-Control-Allow-Origin", "*");
+    server->sendHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS, DELETE");
+    server->sendHeader("Access-Control-Allow-Headers", "authorization, X-PINGOTHER, Content-Type");
+}
+
 void ConfigManager::loop() {
+    /*
     if (mode == ap && apTimeout > 0 && ((millis() - apStart) / 1000) > apTimeout) {
         ESP.restart();
     }
+    */
 
     if (dnsServer) {
         dnsServer->processNextRequest();
@@ -94,6 +110,10 @@ void ConfigManager::handleAPGet() {
 }
 
 void ConfigManager::handleAPPost() {
+    // Protect route with auth
+    if(!this->handleAuth())
+        return;
+
     bool isJson = server->header("Content-Type") == FPSTR(mimeJSON);
     String ssid;
     String password;
@@ -129,7 +149,19 @@ void ConfigManager::handleAPPost() {
     ESP.restart();
 }
 
+void ConfigManager::handleOptions() {
+    // Set CORS headers
+    this->sendCORS();
+    
+    // Send response
+    server->send(200);
+}
+
 void ConfigManager::handleRESTGet() {
+    // Protect route with auth
+    if(!this->handleAuth())
+        return;
+
     DynamicJsonBuffer jsonBuffer;
     JsonObject& obj = jsonBuffer.createObject();
 
@@ -145,10 +177,18 @@ void ConfigManager::handleRESTGet() {
     String body;
     obj.printTo(body);
 
+    // Insert CORS
+    this->sendCORS();
+
+    // Send response
     server->send(200, FPSTR(mimeJSON), body);
 }
 
 void ConfigManager::handleRESTPut() {
+    // Protect route with auth
+    if(!this->handleAuth())
+        return;
+
     JsonObject& obj = this->decodeJson(server->arg("plain"));
     if (!obj.success()) {
         server->send(400, FPSTR(mimeJSON), "");
@@ -166,6 +206,9 @@ void ConfigManager::handleRESTPut() {
 
     writeConfig();
 
+    // Insert CORS
+    this->sendCORS();
+
     server->send(204, FPSTR(mimeJSON), "");
 }
 
@@ -179,6 +222,19 @@ void ConfigManager::handleNotFound() {
 
     server->send(404, FPSTR(mimePlain), "");
     server->client().stop();
+}
+
+bool ConfigManager::handleAuth() {
+    // If auth not defined, return successful
+    if(this->authUserName == NULL && this->authPassword == NULL)
+        return true;
+
+    // Test auth
+    if(server->authenticate(this->authUserName, this->authPassword))
+        return true;
+
+    server->requestAuthentication();
+    return false;
 }
 
 bool ConfigManager::wifiConnected() {
@@ -225,7 +281,7 @@ void ConfigManager::setup() {
 
             WiFi.mode(WIFI_STA);
             startApi();
-            return;
+            //return;
         }
     } else {
         // We are at a cold start, don't bother timeing out.
@@ -243,7 +299,7 @@ void ConfigManager::startAP() {
 
     Serial.println(F("Starting Access Point"));
 
-    WiFi.mode(WIFI_AP);
+    //WiFi.mode(WIFI_AP);
     WiFi.softAP(apName, apPassword);
 	
     delay(500); // Need to wait to get IP
@@ -264,6 +320,10 @@ void ConfigManager::startAP() {
     server->collectHeaders(headerKeys, headerKeysSize);
     server->on("/", HTTPMethod::HTTP_GET, std::bind(&ConfigManager::handleAPGet, this));
     server->on("/", HTTPMethod::HTTP_POST, std::bind(&ConfigManager::handleAPPost, this));
+    server->on("/", HTTPMethod::HTTP_OPTIONS, std::bind(&ConfigManager::handleOptions, this));
+    server->on("/settings", HTTPMethod::HTTP_GET, std::bind(&ConfigManager::handleRESTGet, this));
+    server->on("/settings", HTTPMethod::HTTP_PUT, std::bind(&ConfigManager::handleRESTPut, this));
+    server->on("/settings", HTTPMethod::HTTP_OPTIONS, std::bind(&ConfigManager::handleOptions, this));
     server->onNotFound(std::bind(&ConfigManager::handleNotFound, this));
 
     if (apCallback) {
@@ -285,8 +345,10 @@ void ConfigManager::startApi() {
     server->collectHeaders(headerKeys, headerKeysSize);
     server->on("/", HTTPMethod::HTTP_GET, std::bind(&ConfigManager::handleAPGet, this));
     server->on("/", HTTPMethod::HTTP_POST, std::bind(&ConfigManager::handleAPPost, this));
+    server->on("/", HTTPMethod::HTTP_OPTIONS, std::bind(&ConfigManager::handleOptions, this));
     server->on("/settings", HTTPMethod::HTTP_GET, std::bind(&ConfigManager::handleRESTGet, this));
     server->on("/settings", HTTPMethod::HTTP_PUT, std::bind(&ConfigManager::handleRESTPut, this));
+    server->on("/settings", HTTPMethod::HTTP_OPTIONS, std::bind(&ConfigManager::handleOptions, this));
     server->onNotFound(std::bind(&ConfigManager::handleNotFound, this));
 
     if (apiCallback) {
