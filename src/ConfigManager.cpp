@@ -144,9 +144,17 @@ void ConfigManager::handleAPPost() {
     EEPROM.put(WIFI_OFFSET + 32, passwordChar);
     EEPROM.commit();
 
+    // Set CORS headers
+    this->sendCORS();
+
+    // Send response
     server->send(204, FPSTR(mimePlain), F("Saved. Will attempt to reboot."));
 
-    ESP.restart();
+    // Wait for the response to send
+    delay(200);
+
+    // Restart server
+    this->setup();
 }
 
 void ConfigManager::handleOptions() {
